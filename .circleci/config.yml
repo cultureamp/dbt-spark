@@ -13,9 +13,6 @@ jobs:
     steps:
       - checkout
 
-      - restore_cache:
-          key: test-{{ .Branch }}
-
       - run:
           name: Checkout test project
           command: git clone https://github.com/fishtown-analytics/dbt-integration-tests.git
@@ -23,10 +20,6 @@ jobs:
       - run:
           name: "Setup credentials"
           command: mkdir -p ~/.dbt/ && cp ~/project/test/integration/profiles.yml ~/.dbt/profiles.yml
-
-      - save_cache:
-          key: test-{{ .Branch }}
-          paths: dbt-integration-tests
 
       - run:
           name: Run integration tests
