@@ -44,7 +44,7 @@ dbt-spark has also been tested against AWS Databricks, and it has some differenc
 
 Please ignore all references to port 15001 in the databricks-connect docs as that is specific to that tool; port 443 is used for dbt-spark's https connection.
 
-Lastly, the host field for Databricks can be found at the start of your workspace or cluster url (but don't include https://): region.azuredatabricks.net for Azure, or account.cloud.databricks.com for AWS.  
+Lastly, the host field for Databricks can be found at the start of your workspace or cluster url (but don't include https://): region.azuredatabricks.net for Azure, or account.cloud.databricks.com for AWS.
 
 
 
@@ -117,19 +117,18 @@ The following configurations can be supplied to models run with the dbt-spark pl
 
 | Option  | Description                                        | Required?               | Example                  |
 |---------|----------------------------------------------------|-------------------------|--------------------------|
-| file_format  | The file format to use when creating tables | Optional                | `parquet`              |
+| file_format | The file format to use when creating tables (`parquet`, `delta`, `csv`, `json`, `text`, `jdbc`, `orc`, `hive` or `libsvm`). | Optional | `parquet`|
 | location_root  | The created table uses the specified directory to store its data. The table alias is appended to it. | Optional                | `/mnt/root`              |
 | partition_by  | Partition the created table by the specified columns. A directory is created for each partition. | Optional                | `partition_1`              |
 | clustered_by  | Each partition in the created table will be split into a fixed number of buckets by the specified columns. | Optional               | `cluster_1`              |
 | buckets  | The number of buckets to create while clustering | Required if `clustered_by` is specified                | `8`              |
+| incremental_strategy | The strategy to use for incremental models (`insert_overwrite` or `merge`). Note `merge` requires `file_format` = `delta` and `unique_key` to be specified. | Optional (default: `insert_overwrite`) | `merge` |
 
 
 **Incremental Models**
 
-Spark does not natively support `delete`, `update`, or `merge` statements. As such, [incremental models](https://docs.getdbt.com/docs/configuring-incremental-models)
-are implemented differently than usual in this plugin. To use incremental models, specify a `partition_by` clause in your model config.
-dbt will use an `insert overwrite` query to overwrite the partitions included in your query. Be sure to re-select _all_ of the relevant
-data for a partition when using incremental models.
+To use incremental models, specify a `partition_by` clause in your model config. The default incremental strategy used is `insert_overwrite`, which will overwrite the partitions included in your query. Be sure to re-select _all_ of the relevant
+data for a partition when using the `insert_overwrite` strategy.
 
 ```
 {{ config(
@@ -150,6 +149,61 @@ select
 from {{ ref('events') }}
 where date_day::date >= '2019-01-01'
 group by 1
+```
+
+The `merge` strategy is only supported when using file_format `delta` (supported in Databricks). It also requires you to specify a `unique key` to match existing records.
+
+```
+{{ config(
+    materialized='incremental',
+    incremental_strategy='merge',
+    partition_by=['date_day'],
+    file_format='delta'
+) }}
+
+select *
+from {{ ref('events') }}
+{% if is_incremental() %}
+  where date_day > (select max(date_day) from {{ this }})
+{% endif %}
+```
+
+### Running locally
+
+A `docker-compose` environment starts a Spark Thrift server and a Postgres database as a Hive Metastore backend.
+
+```
+docker-compose up
+```
+
+Your profile should look like this:
+
+```
+your_profile_name:
+  target: local
+  outputs:
+    local:
+      method: thrift
+      type: spark
+      schema: analytics
+      host: 127.0.0.1
+      port: 10000
+      user: dbt
+      connect_retries: 5
+      connect_timeout: 60
+```
+
+Connecting to the local spark instance:
+
+* The Spark UI should be available at [http://localhost:4040/sqlserver/](http://localhost:4040/sqlserver/)
+* The endpoint for SQL-based testing is at `http://localhost:10000` and can be referenced with the Hive or Spark JDBC drivers using connection string `jdbc:hive2://localhost:10000` and default credentials `dbt`:`dbt`
+
+Note that the Hive metastore data is persisted under `./.hive-metastore/`, and the Spark-produced data under `./.spark-warehouse/`. To completely reset you environment run the following:
+
+```
+docker-compose down
+rm -rf ./.hive-metastore/
+rm -rf ./.spark-warehouse/
 ```
 
 ### Reporting bugs and contributing code
